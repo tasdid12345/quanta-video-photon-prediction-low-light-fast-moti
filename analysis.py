@@ -15,6 +15,7 @@ SEED, T, T0, H, N_PER = 42, 9, 4, 64, 600      # frames per video, reference fra
 PEAKS, SPEEDS = [0.05, 0.2], [0.5, 3.0]        # peak photons/pixel/frame, px/frame
 MAIN = (min(PEAKS), max(SPEEDS))               # darkest + fastest
 WIN = np.outer(np.hanning(H), np.hanning(H))
+YY, XX = np.mgrid[0:H, 0:H].astype(np.float32) / (H - 1)
 t_start = time.time()
 
 # ---------- data ----------
@@ -58,14 +59,23 @@ def est_vel(b):
 def patches(b):  # baseline: 5 frames x 5x5 patch around each pixel
     return swv(np.pad(b, ((0, 0), (2, 2), (2, 2)), mode="reflect"), (5, 5, 5), axis=(0, 1, 2))
 
+def nbr(z, k):
+    """Mean of the k x k neighbours of each pixel EXCLUDING the centre. Computed in float64 with exact integer
+    rounding so no floating-point residue of the centre bit leaks into the feature."""
+    c = ndi.uniform_filter(z.astype(np.float64), k, mode="mirror")
+    return (np.rint(c * k * k) - z) / (k * k - 1)
+
 def feats(b, v, t):
     """Improved: align all other frames to frame t, multi-scale photon-count features; centre bit never used."""
     us = [u for u in range(T) if u != t]
     al = [ndi.shift(b[u], -(u - t) * v, order=1, mode="nearest") for u in us]
     allm, near = np.mean(al, 0), np.mean([a for a, u in zip(al, us) if abs(u - t) <= 2], 0)
+    raw = np.mean([b[u] for u in us], 0)                    # un-aligned temporal mean (robust to motion errors)
     box = lambda z, k: ndi.uniform_filter(z, k, mode="mirror")
-    f = [allm] + [box(allm, k) for k in (3, 5, 9, 17)] + [near, box(near, 3), box(near, 5)]
-    f += [(box(b[t], k) * k * k - b[t]) / (k * k - 1) for k in (3, 5, 9)]   # same-frame neighbours, centre excluded
+    f = [allm] + [box(allm, k) for k in (3, 5, 9, 17, 33)] + [near, box(near, 3), box(near, 5), box(near, 9)]
+    f += [raw, box(raw, 9), box(raw, 17)]
+    f += [nbr(b[t], k) for k in (3, 5, 9, 17)]              # same-frame neighbours, centre excluded
+    f += [YY, XX, np.full((H, H), v[0], np.float32), np.full((H, H), v[1], np.float32)]
     return np.stack(f, -1).astype(np.float32)
 
 # ---------- metrics ----------
@@ -80,8 +90,9 @@ def ssim(e, c, k=7):
 # ---------- label-free CV (held-out bit Brier score, grouped by subject) ----------
 def make_mlp(p): return MLPRegressor(hidden_layer_sizes=p[0], alpha=p[1], batch_size=512, max_iter=25,
                                      early_stopping=True, n_iter_no_change=3, random_state=SEED)
-def make_gbm(p): return LGBMClassifier(n_estimators=250, learning_rate=0.05, num_leaves=p, min_child_samples=100,
-                                       subsample=0.8, subsample_freq=1, random_state=SEED, n_jobs=4, verbose=-1)
+def make_gbm(p): return LGBMClassifier(n_estimators=300, learning_rate=0.05, num_leaves=p, min_child_samples=100,
+                                       subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
+                                       random_state=SEED, n_jobs=4, verbose=-1)
 def predict(m, X): return m.predict_proba(X)[:, 1] if hasattr(m, "predict_proba") else np.clip(m.predict(X), 0, 1)
 def cv_select(make, grid, X, y, g):
     sc = [np.mean([np.mean((y[va] - predict(make(p).fit(X[a], y[a]), X[va])) ** 2)
@@ -145,8 +156,8 @@ json.dump({
                 "n_rows": int(len(imgs)), "n_train": int(len(tr)), "n_test": int(len(te)), "same_as_paper": False},
     "metric_name": "PSNR (dB) on darkest, fastest test setting", "higher_is_better": True,
     "baseline": "bit2bit-style sklearn MLPRegressor on a 5-frame x 5x5 bit patch with the centre pixel masked; predicted photon probability is the reconstruction.",
-    "improved": "Phase-correlation motion estimate on short bit-count sums, frame alignment, LightGBM on multi-scale aligned photon-count features with the same self-supervised bit target, then Bernoulli ML flux inversion.",
+    "improved": "Phase-correlation motion estimate on short bit-count sums, frame alignment, LightGBM on multi-scale aligned and unaligned photon-count features (plus pixel position and estimated velocity) with the same self-supervised bit target, then Bernoulli ML flux inversion.",
     "metrics": m,
-    "notes": "Small-scale simulation, not the paper's data or network (bit2bit uses a deep 3D model). Separate models per setting; hyper-parameters chosen by subject-grouped CV (held-out bit Brier score) on the main setting's training data. Both models' outputs go through the same -log(1-p) inversion and are normalised by the peak flux, which is assumed known. Global translation only; 'nearest' edge fill. Single seed, one split, so differences may be within noise."},
+    "notes": "Small-scale simulation, not the paper's data or network (bit2bit uses a deep 3D model). Separate models per setting; hyper-parameters chosen by subject-grouped CV (held-out bit Brier score) on the main setting's training data. Both models' outputs go through the same -log(1-p) inversion and are normalised by the peak flux, which is assumed known. Global translation only; 'nearest' edge fill. A previous run had a leak: float32 rounding residue in the same-frame neighbour features encoded the centre (target) bit; neighbour counts are now computed in float64 with exact integer rounding. Single seed, one split, so differences may be within noise."},
     open("results.json", "w", encoding="utf-8"), indent=2)
 print(f"done in {time.time() - t_start:.0f}s")
