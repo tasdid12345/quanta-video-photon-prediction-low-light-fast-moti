@@ -78,8 +78,8 @@ def ssim(e, c, k=7):
     return s.mean((1, 2))
 
 # ---------- label-free CV (held-out bit Brier score, grouped by subject) ----------
-def make_mlp(p): return MLPRegressor(p[0], alpha=p[1], batch_size=512, max_iter=25, early_stopping=True,
-                                     n_iter_no_change=3, random_state=SEED)
+def make_mlp(p): return MLPRegressor(hidden_layer_sizes=p[0], alpha=p[1], batch_size=512, max_iter=25,
+                                     early_stopping=True, n_iter_no_change=3, random_state=SEED)
 def make_gbm(p): return LGBMClassifier(n_estimators=250, learning_rate=0.05, num_leaves=p, min_child_samples=100,
                                        subsample=0.8, subsample_freq=1, random_state=SEED, n_jobs=4, verbose=-1)
 def predict(m, X): return m.predict_proba(X)[:, 1] if hasattr(m, "predict_proba") else np.clip(m.predict(X), 0, 1)
@@ -101,7 +101,7 @@ for peak, speed in settings:
         Xb.append(patches(bits[i])[t - 2, ys, xs].reshape(N_PER, 125))
         Xi.append(np.concatenate([feats(bits[i], vh[i], tt)[ys[t == tt], xs[t == tt]] for tt in np.unique(t)]))
         y.append(bits[i][t, ys, xs]); g.append(np.full(N_PER, subj[i]))
-    Xb, Xi, y, g = np.concatenate(Xb), np.concatenate(Xi), np.concatenate(y), np.concatenate(g)
+    Xb, Xi, y, g = np.concatenate(Xb), np.concatenate(Xi), np.concatenate(y).astype(np.int32), np.concatenate(g)
     Xb[:, 62] = 0                                               # mask the centre pixel (the target bit)
     if hp is None:                                              # CV on training data of the main setting only
         sub = rng.choice(len(y), 50000, replace=False)
