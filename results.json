@@ -1,0 +1,35 @@
+{
+  "question": "Can a motion-compensated, Bernoulli-photon-statistics model reconstruct 1-bit quanta video better than a bit2bit-style self-supervised photon-prediction baseline in very dark, fast-motion conditions?",
+  "method": "Olivetti faces -> constant-velocity translation videos -> Bernoulli 1-bit frames at several flux levels/speeds; train on binary frames of training subjects only (self-supervised bit prediction), test on held-out subjects; PSNR vs clean frame.",
+  "dataset": {
+    "name": "Olivetti faces (simulated 1-bit videos)",
+    "source_url": "https://scikit-learn.org/stable/modules/generated/sklearn.datasets.fetch_olivetti_faces.html",
+    "n_rows": 400,
+    "n_train": 300,
+    "n_test": 100,
+    "same_as_paper": false
+  },
+  "metric_name": "PSNR (dB) on darkest, fastest test setting",
+  "higher_is_better": true,
+  "baseline": "bit2bit-style sklearn MLPRegressor on a 5-frame x 5x5 bit patch with the centre pixel masked; predicted photon probability is the reconstruction.",
+  "improved": "Phase-correlation motion estimate on short bit-count sums, frame alignment, LightGBM on multi-scale aligned and unaligned photon-count features (plus pixel position and estimated velocity) with the same self-supervised bit target, then Bernoulli ML flux inversion.",
+  "metrics": {
+    "baseline_score": 9.780452728271484,
+    "improved_score": 15.082688852016327,
+    "baseline_ssim": 0.02416200004518032,
+    "improved_ssim": 0.1249356125070719,
+    "baseline_psnr_all": 12.338228225708008,
+    "improved_psnr_all": 16.941039699506312,
+    "motion_error_px_per_frame_main": 1.9409443904449915,
+    "improvement": 5.3022361237448425,
+    "baseline_psnr_flux0.05_speed3.0": 9.780452728271484,
+    "improved_psnr_flux0.05_speed3.0": 15.082688852016327,
+    "baseline_psnr_flux0.05_speed0.5": 9.992814064025879,
+    "improved_psnr_flux0.05_speed0.5": 15.631452434263679,
+    "baseline_psnr_flux0.2_speed0.5": 14.612131118774414,
+    "improved_psnr_flux0.2_speed0.5": 18.92312226916765,
+    "baseline_psnr_flux0.2_speed3.0": 14.967514991760254,
+    "improved_psnr_flux0.2_speed3.0": 18.126895242577596
+  },
+  "notes": "Small-scale simulation, not the paper's data or network (bit2bit uses a deep 3D model). Separate models per setting; hyper-parameters chosen by subject-grouped CV (held-out bit Brier score) on the main setting's training data. Both models' outputs go through the same -log(1-p) inversion and are normalised by the peak flux, which is assumed known. Global translation only; 'nearest' edge fill. A previous run had a leak: float32 rounding residue in the same-frame neighbour features encoded the centre (target) bit; neighbour counts are now computed in float64 with exact integer rounding. Single seed, one split, so differences may be within noise."
+}
